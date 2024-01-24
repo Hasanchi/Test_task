@@ -1,0 +1,40 @@
+version: '3.9'
+services:
+  web:
+    build: .
+    command: uvicorn src.main:app --host 0.0.0.0 --reload
+    volumes:
+      - .:/src
+    ports:
+      - 8008:8000
+    depends_on:
+      - db
+  pgadmin:
+    image: dpage/pgadmin4:6.15
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: root
+      PGADMIN_LISTEN_PORT: 80
+    ports:
+      - '15432:80'
+    volumes:
+      - pgadmin:/var/lib/pgadmin
+    depends_on:
+      - db
+
+  db:
+    container_name: db
+    image: postgres:16.1
+    restart: always
+    environment:
+      POSTGRES_DB: "postgres"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+
+volumes:
+  postgres_data:
+  pgadmin:

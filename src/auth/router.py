@@ -1,50 +1,46 @@
-from fastapi import APIRouter, Depends, Cookie, HTTPException, Response
+from fastapi import APIRouter, Depends, Cookie, HTTPException, Response, Request
 from fastapi.openapi.models import OAuth2
 from fastapi.security import OAuth2PasswordRequestForm
 
-
-from src.auth.dependencies import user_service
-from src.services.user import UserServices
 from src.auth.cockies import OAuth2PasswordBearerWithCookie
 from src.database import get_async_session
 from src.auth.jwt import create_jwt, verify_jwt
-from src.auth.models import User
+from src.project.models import User, ProjectUser
+from src.auth.schema import UpdateUserSchema
 
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from passlib.context import CryptContext
 from typing import Annotated
 
 auth_rouret = APIRouter(prefix='/auth', tags=['Авторизация и регистрация'])
-oauth2_scheme = OAuth2PasswordBearerWithCookie(tokenUrl="/auth/token")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-# @user_router.get('/')
-# async def get_users(user_services: Annotated[UserServices, Depends(user_service)]):
-#     users = await user_services.get_users()
-#     return users
-
 
 @auth_rouret.get('/me')
-async def get_users(access_token: Annotated[str | None, Cookie()] = None):
-    user = get_current_user(access_token)
-    return [user]
+async def get_users(request: Request):
+    data = get_current_user(request)
+    return [data]
 
 
-
-
-
-def get_current_user(access_token: str):
-    # token = request.cookies.get('access_token')
+@auth_rouret.put('/me')
+async def update_me(request: Request, body: UpdateUserSchema, session: AsyncSession = Depends(get_async_session)):
+    decode_data = get_current_user(request)
+    user_id = decode_data['id']
+    hashed_password = pwd_context.hash(secret=body.password, scheme='bcrypt')
+    query = update(User).values(username=body.username, hashed_password=hashed_password).where(id==user_id)
+    await session.execute(query)
+    await session.commit()
+    return {
+        'message': 'Ваши данные успешно изменены'
+    }
     
-    # # if token == None:
-    # #     HTTPException(status_code=400, detail='Invalid token')
-    # tokens = token[2::]
-    # tokens = tokens.split("'")
 
+def get_current_user(request: Request):
+    access_token = request.cookies.get('access_token')
     decode_data = verify_jwt(access_token)
-    if not decode_data:
+    if decode_data is None:
         HTTPException(status_code=400, detail='Invalid token')
 
     return decode_data
@@ -53,7 +49,7 @@ def get_current_user(access_token: str):
 @auth_rouret.post("/register")
 async def register_user(username: str, password: str, db: AsyncSession = Depends(get_async_session)):
     hashed_password = pwd_context.hash(secret=password, scheme='bcrypt')
-    # Сохраните пользователя в базе данных
+
     db.add(User(username=username, hashed_password=hashed_password))
     await db.commit()
     return {"username": username, "hashed_password": hashed_password}
@@ -72,7 +68,12 @@ async def authenticate_user(response: Response, form_data: OAuth2PasswordRequest
     if not is_password_correct:
         raise HTTPException(status_code=400, detail="Incorrect username or password")
 
-    jwt_token = create_jwt({"username": user.username})
+    jwt_token = create_jwt(
+                {
+                    "id": user.id,
+                    "username": user.username
+                }
+            )
 
     response.set_cookie(key="access_token", value=jwt_token, httponly=True)
     return {"access_token": jwt_token, "token_type": "bearer"}

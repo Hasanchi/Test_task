@@ -1,9 +1,8 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.database import async_session_maker
-from src.project.models import User, ProjectUser, Role, Status, Task
-from src.auth.router import get_current_user
+from src.models import User, ProjectUser, Role, Status, Task
+from src.user.router import get_current_user
 
 
 class StatusCheck:

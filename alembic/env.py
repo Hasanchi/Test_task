@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from src.models import Base
 
-from src.project.models import Project, Task, ProjectUser, User
+from src.models import Project, Task, ProjectUser, User
 
 from alembic import context
 

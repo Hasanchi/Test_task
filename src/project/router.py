@@ -3,11 +3,11 @@ from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from src.auth.router import get_current_user
+from src.user.router import get_current_user
 from src.database import get_async_session
-from src.project.dependencies import get_user_username, get_role_id, TaskCheck, StatusCheck, check_blocked, search_user_in_project
-from src.project.models import ProjectUser, Project, Task, Role
-from src.project.schema import CreatedProject, CreatedTask, UpdateUserForManager, UpdateTask, SelectTask
+from src.project.helper import get_user_username, get_role_id, TaskCheck, StatusCheck, check_blocked, search_user_in_project
+from src.models import ProjectUser, Project, Task, Role
+from src.project.schema import CreatedProject, CreatedTask, UpdateUserForManager, UpdateTask, SelectedProject
 
 project_router = APIRouter(prefix='/project', tags=['Project'])
 
@@ -22,7 +22,6 @@ async def get_projects(
     query = (
         select(ProjectUser)
         .where(ProjectUser.user_id == user_id)
-        .options(joinedload(ProjectUser.user))
         .options(joinedload(ProjectUser.project))
     )
     resulst = await session.execute(query)
@@ -70,10 +69,16 @@ async def add_project(
 @project_router.get('/task/{task_id}')
 async def get_task(
         task_id: int,
-        requset: Request,
         session: AsyncSession = Depends(get_async_session)
 ):
-    query = select(Task).where(Task.id == task_id).options(joinedload(Task.blocked_by), joinedload(Task.blocking_by))
+    query = (
+        select(Task)
+        .where(Task.id == task_id)
+        .options(
+            joinedload(Task.blocked_by),
+            joinedload(Task.blocking_by)
+        )
+    )
     result = await session.execute(query)
     return [result.scalar()]
 
@@ -103,7 +108,6 @@ async def update_task(
         project_id: int,
         task_id: int,
         body: UpdateTask,
-        request: Request,
         session: AsyncSession = Depends(get_async_session)
 ):
     if await check_blocked(session, task_id):
@@ -120,9 +124,12 @@ async def update_task(
     role = await get_role_id(session, executor_id, project_id)
     role = role[0]
 
-    taskcom = TaskCheck(status=new_status, executor=role)
+    taskcheck = TaskCheck(status=new_status, executor=role)
 
-    value = taskcom.is_valid_status_executor_combination(taskcom.status, taskcom.executor)
+    value = taskcheck.is_valid_status_executor_combination(
+        taskcheck.status,
+        taskcheck.executor
+    )
 
     if not value:
         return {
@@ -137,7 +144,7 @@ async def update_task(
 
     if not value:
         return {
-            'message': 'Вы не можете сделать этого'
+            'message': f'Вы не можете поменять статус с {current_status} до {new_status}'
         }
 
     query = update(Task).where(Task.id == task_id).values(**data)

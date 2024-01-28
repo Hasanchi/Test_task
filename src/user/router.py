@@ -2,24 +2,26 @@ from fastapi import APIRouter, Depends, HTTPException, Response, Request
 from fastapi.security import OAuth2PasswordRequestForm
 
 from src.database import get_async_session
-from src.auth.jwt import create_jwt, verify_jwt
-from src.project.models import User
+from src.user.jwt import create_jwt, verify_jwt
+from src.models import User
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from passlib.context import CryptContext
 
-auth_rouret = APIRouter(prefix='/user', tags=['Пользователь'])
+user_router = APIRouter(prefix='/user', tags=['Пользователь'])
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-@auth_rouret.get('/me')
-async def get_users(request: Request):
-    data = get_current_user(request)
-    return [data]
+def get_current_user(request: Request):
+    access_token = request.cookies.get('access_token')
+    decode_data = verify_jwt(access_token)
+    if decode_data is None:
+        HTTPException(status_code=400, detail='Invalid token')
+    return decode_data
 
 
-@auth_rouret.put('/me')
+@user_router.put('/me')
 async def update_me(
         request: Request,
         username: str,
@@ -43,15 +45,7 @@ async def update_me(
     }
 
 
-def get_current_user(request: Request):
-    access_token = request.cookies.get('access_token')
-    decode_data = verify_jwt(access_token)
-    if decode_data is None:
-        HTTPException(status_code=400, detail='Invalid token')
-    return decode_data
-
-
-@auth_rouret.post("/register")
+@user_router.post("/register")
 async def register_user(
         username: str,
         password: str,
@@ -63,7 +57,7 @@ async def register_user(
     return {"username": username, "hashed_password": hashed_password}
 
 
-@auth_rouret.post("/token")
+@user_router.post("/token")
 async def authenticate_user(
         response: Response,
         form_data: OAuth2PasswordRequestForm = Depends(),
@@ -74,7 +68,7 @@ async def authenticate_user(
     if not user:
         raise HTTPException(
             status_code=400,
-            detail="Incorrect email or password"
+            detail="Пользователь не найден"
         )
 
     is_password_correct = pwd_context.verify(
@@ -85,7 +79,7 @@ async def authenticate_user(
     if not is_password_correct:
         raise HTTPException(
             status_code=400,
-            detail="Incorrect username or password"
+            detail="Некорректный password или username"
         )
 
     jwt_token = create_jwt(

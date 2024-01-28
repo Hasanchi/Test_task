@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 class UpdateUserSchema(BaseModel):
     username: str
-    role: str
+    password: str
 
 
 class SelectUserSchema(BaseModel):

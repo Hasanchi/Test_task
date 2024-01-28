@@ -7,9 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.router import get_current_user
 from src.database import get_async_session
-from src.project.dependencies import get_user_username, get_role_id, get_user_id, TaskCom
-from src.project.models import ProjectUser, Project, Task, User, Role
-from src.project.schema import CreatedProject, CreatedTask, SelectedProject, UpdateUserForManager, UpdateTask
+from src.project.dependencies import get_user_username, get_role_id, get_user_id, TaskCheck, StatusCheck
+from src.project.models import ProjectUser, Project, Task, User, Role, Status
+from src.project.schema import CreatedProject, CreatedTask, SelectedProject, UpdateUserForManager, UpdateTask, SelectTask
 
 import logging
 
@@ -22,20 +22,19 @@ project_router = APIRouter(prefix='/project', tags=['Project'])
 async def get_projects(request: Request, session: AsyncSession = Depends(get_async_session)):
     decode_data = get_current_user(request)
     user_id = decode_data['id']
-
-    # user = await get_user_username(session, username)
     query = select(ProjectUser).where(ProjectUser.user_id == user_id).options(joinedload(ProjectUser.user)).options(joinedload(ProjectUser.project))
     resulst = await session.execute(query)
     return resulst.scalars().all()
 
 
-@project_router.get('/{project_id}/task')
+@project_router.get('/tasks', response_model=list[SelectTask])
 async def get_tasks(project_id: int, request: Request, session: AsyncSession = Depends(get_async_session)):
-    query = select(Task).where(Task.project_id==project_id)
+    query = select(Task).where(Task.project_id == project_id)
     resulst = await session.execute(query)
-    return [resulst.scalars().all()]
+    return resulst.scalars().all()
 
-@project_router.get('/{project_id}')
+
+@project_router.get('/users')
 async def get_users(project_id: int, request: Request, session: AsyncSession = Depends(get_async_session)):
     query = select(ProjectUser.user)
     resulst = await session.execute(query)    
@@ -62,56 +61,60 @@ async def add_project(body: CreatedProject, request: Request, session: AsyncSess
             detail='Необработанный ответ'
         )
 
+
 @project_router.get('/task/{task_id}')
 async def get_task(task_id: int, requset: Request, session: AsyncSession = Depends(get_async_session)):
-    query = select(Task).where(Task.id==task_id)
+    query = select(Task).where(Task.id == task_id)
     result = await session.execute(query)
     return [result.scalar()]
 
 
-@project_router.post('/{project_id}/task/add')
+@project_router.post('/task/add')
 async def add_task_in_project(project_id: int, body: CreatedTask, request: Request, session: AsyncSession = Depends(get_async_session)):
     decode_data = get_current_user(request)
     user_id = decode_data['id']
     data = body.model_dump()
     data['project_id'] = project_id
     data['сreator_id'] = user_id
-    print(data)
-    try:
-        task = Task(**data)
-        session.add(task)
-        await session.commit()
-        return {
-            'message': 'Задача успешно добавлена'
-        }
-    except Exception as e:
-        await session.rollback()
-        HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(e)
-        )
+    task = Task(**data)
+    session.add(task)
+    await session.commit()
+    return {
+        'message': 'Задача успешно добавлена'
+    }
+    
 
-@project_router.put('/{project_id}/task/{task_id}')
+
+@project_router.put('/task/{task_id}')
 async def update_task(project_id: int, task_id: int, body: UpdateTask, request: Request, session: AsyncSession = Depends(get_async_session)):
     data = body.model_dump()
 
     executor_id = data['executor_id']
 
-    status = data['status']
-    # To do
-    # "Testing"
-    # Разработчик
+    new_status = data['status']
 
     role = await get_role_id(session, executor_id, project_id)
-    taskcom = TaskCom(status=status, executor=role)
-    
+    role = role[0]
 
-    value = taskcom.is_valid_status_executor_combination(taskcom.status, taskcom.executor[0])
-    
-    return {
-        'message': value
-    }
-    
+    taskcom = TaskCheck(status=new_status, executor=role)
+
+    value = taskcom.is_valid_status_executor_combination(taskcom.status, taskcom.executor)
+
+    if not value:
+        return {
+            'message': f'Вы не можете назначить исполнителем {role.value} на задачу со статусом {new_status}'
+        }
+    query = select(Task.status).where(Task.id == task_id)
+    current_status = await session.execute(query)
+    current_status = current_status.scalar()
+
+    status_check = StatusCheck(current_status, new_status)
+    value = status_check.check_status()
+
+    if not value:
+        return {
+            'message': 'Вы не можете сделать этого'
+        }
 
     query = update(Task).where(Task.id == task_id).values(**data)
     await session.execute(query)
@@ -121,7 +124,7 @@ async def update_task(project_id: int, task_id: int, body: UpdateTask, request: 
     }
 
 
-@project_router.post('/{project_id}/user/add')
+@project_router.post('/user/add')
 async def add_user_in_project(project_id: int, body: UpdateUserForManager, request: Request, session: AsyncSession = Depends(get_async_session)):
     user = await get_user_username(session, body.username)
     try:
@@ -139,7 +142,7 @@ async def add_user_in_project(project_id: int, body: UpdateUserForManager, reque
         )
 
 
-@project_router.put('/{project_id}/user/{username}')
+@project_router.put('/user/{username}')
 async def update_user_in_project(project_id: int, body: UpdateUserForManager, username: str, request: Request, session: AsyncSession = Depends(get_async_session)):
     decode_data = get_current_user(request)
     meneger_id = decode_data['id']

@@ -2,28 +2,49 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database import async_session_maker
-from src.project.models import User, ProjectUser, Role
+from src.project.models import User, ProjectUser, Role, Status
 
 
-class TaskCom:
+class StatusCheck:
+    def __init__(self, current_status, new_status) -> None:
+        self.current_status = current_status
+        self.new_status = new_status
+    
+    def check_status(self):
+        if self.new_status in [Status.to_do, Status.wontfix]:
+            return True
+        elif self.current_status == Status.to_do and self.new_status == Status.in_progress:
+            return True
+        elif self.current_status == Status.in_progress and self.new_status == Status.code_review:
+            return True
+        elif self.current_status == Status.code_review and self.new_status == Status.dev_test:
+            return True
+        elif self.current_status == Status.dev_test and self.new_status == Status.testing:
+            return True
+        elif self.current_status == Status.testing and self.new_status == Status.done:
+            return True
+        else:
+            return False
+
+class TaskCheck:
     def __init__(self, status, executor):
         self.status = status
         self.executor = executor
 
     def is_valid_executor(self, executor):
-        if self.status in ["In progress", "Code review", "Dev test"]:
-            return executor != "Тест-инженер"
-        elif self.status == "Testing":
-            return executor != "Разработчик"
+        if self.status in [Status.in_progress, Status.code_review, Status.dev_test]:
+            return executor != Role.test_engineer
+        elif self.status == Status.testing:
+            return executor != Role.developer
         else:
             return True
 
     def is_valid_status_executor_combination(self, status, executor):
-        if executor == Role.meneger.name:
+        if executor == Role.meneger:
             return False
-        if executor == "Тимлид":
+        if executor == Role.team_leader:
             return True
-        if executor is None and status != "In progress":
+        if executor is None and status != Status.in_progress:
             return True
         return self.is_valid_executor(executor)
 

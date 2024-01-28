@@ -77,6 +77,16 @@ class Task(Base):
         back_populates='tasks'
     )
 
+    blocked_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            'task.id',
+            ondelete='CASCADE'
+        )
+    )
+    blocked_by: Mapped['Task'] = relationship(
+        remote_side=[id]
+    )
+
 
 class Project(Base):
     __tablename__ = 'project'
@@ -120,7 +130,6 @@ class ProjectUser(Base):
 class User(Base):
     __tablename__ = 'user'
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    
     username: Mapped[str] = mapped_column(unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(nullable=False)
 

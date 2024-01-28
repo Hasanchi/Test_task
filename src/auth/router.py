@@ -25,31 +25,29 @@ async def get_users(request: Request):
 
 
 @auth_rouret.put('/me')
-async def update_me(request: Request, body: UpdateUserSchema, session: AsyncSession = Depends(get_async_session)):
+async def update_me(request: Request, username: str, password: str, session: AsyncSession = Depends(get_async_session)):
     decode_data = get_current_user(request)
     user_id = decode_data['id']
-    hashed_password = pwd_context.hash(secret=body.password, scheme='bcrypt')
-    query = update(User).values(username=body.username, hashed_password=hashed_password).where(id==user_id)
+    hashed_password = pwd_context.hash(secret=password, scheme='bcrypt')
+    query = update(User).values(username=username, hashed_password=hashed_password).where(User.id == user_id)
     await session.execute(query)
     await session.commit()
     return {
         'message': 'Ваши данные успешно изменены'
     }
-    
+
 
 def get_current_user(request: Request):
     access_token = request.cookies.get('access_token')
     decode_data = verify_jwt(access_token)
     if decode_data is None:
         HTTPException(status_code=400, detail='Invalid token')
-
     return decode_data
 
 
 @auth_rouret.post("/register")
 async def register_user(username: str, password: str, db: AsyncSession = Depends(get_async_session)):
     hashed_password = pwd_context.hash(secret=password, scheme='bcrypt')
-
     db.add(User(username=username, hashed_password=hashed_password))
     await db.commit()
     return {"username": username, "hashed_password": hashed_password}

@@ -34,6 +34,7 @@ class Priority(Enum):
     medium = 'Medium'
     low = 'Low'
 
+
 class Role(Enum):
     meneger = 'Менеджер'
     developer = 'Разработчик'
@@ -77,14 +78,17 @@ class Task(Base):
         back_populates='tasks'
     )
 
-    blocked_by_id: Mapped[int | None] = mapped_column(
+    blocking_by_id: Mapped[int | None] = mapped_column(
         ForeignKey(
             'task.id',
             ondelete='CASCADE'
         )
     )
-    blocked_by: Mapped['Task'] = relationship(
+    blocking_by: Mapped[list['Task']] = relationship(
         remote_side=[id]
+    )
+    blocked_by: Mapped[list['Task']] = relationship(
+        remote_side=[blocking_by_id]
     )
 
 
@@ -124,9 +128,6 @@ class ProjectUser(Base):
     role: Mapped['Role'] = mapped_column(nullable=True)
 
 
-
-
-
 class User(Base):
     __tablename__ = 'user'
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
@@ -136,6 +137,7 @@ class User(Base):
     project_user: Mapped['ProjectUser'] = relationship(
         back_populates='user'
     )
+
     def to_read_model(self) -> SelectUserSchema:
         return SelectUserSchema(
             id=self.id,

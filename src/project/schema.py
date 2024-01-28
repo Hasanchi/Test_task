@@ -14,17 +14,29 @@ class CreatedProject(BaseModel):
 
 
 class UpdateTask(BaseModel):
+    type: Type
+    priority: Priority
     status: Status
     executor_id: int
 
+    class Config:
+        json_schema_extra = {
+            'example': {
+                'type': 'Bug/Task',
+                'priority': 'Critical/High/Medium/Low',
+                'status': 'To do/In progress/Code review/Dev test/Testing/Done/Wontfix',
+                'executor_id': 2
+            }
+        }
+
 
 class CreatedTask(BaseModel):
-    id: int
     type: Type
     priority: Priority
     status: Status
     heading: str
     description: str
+    blocked_by_id: int | None = None
 
     class Config:
         json_schema_extra = {
@@ -33,12 +45,14 @@ class CreatedTask(BaseModel):
                 'priority': 'Critical/High/Medium/Low',
                 'status': 'To do/In progress/Code review/Dev test/Testing/Done/Wontfix',
                 'heading': 'Функция по добавлению пользовотеля',
-                'description': 'Нужно добавить функцию по добавлению пользователя'
+                'description': 'Нужно добавить функцию по добавлению пользователя',
+                'blocked_by_id': 5
             }
         }
 
 
 class SelectTask(CreatedTask):
+    id: int
     сreator_id: int
     executor_id: int | None
     created_at: datetime
@@ -48,6 +62,12 @@ class SelectTask(CreatedTask):
     class Cofig:
         json_schema_extra = None
         from_attributes = True
+
+
+class DetailTask(SelectTask):
+
+    blocking_by: list[SelectTask] | None
+    blocked_by: list[SelectTask] | None
 
 
 class SelectedProject(CreatedProject):

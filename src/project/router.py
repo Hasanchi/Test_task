@@ -1,76 +1,90 @@
 from fastapi import APIRouter, Request, Depends, HTTPException, status
-
-from sqlalchemy import select, insert, update, Delete
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from sqlalchemy.orm import joinedload
 
 from src.auth.router import get_current_user
 from src.database import get_async_session
-from src.project.dependencies import get_user_username, get_role_id, get_user_id, TaskCheck, StatusCheck
-from src.project.models import ProjectUser, Project, Task, User, Role, Status
-from src.project.schema import CreatedProject, CreatedTask, SelectedProject, UpdateUserForManager, UpdateTask, SelectTask
-
-import logging
-
-logging.basicConfig(level=logging.INFO, filename="py_log.log",filemode="w")
+from src.project.dependencies import get_user_username, get_role_id, TaskCheck, StatusCheck, check_blocked, search_user_in_project
+from src.project.models import ProjectUser, Project, Task, Role
+from src.project.schema import CreatedProject, CreatedTask, UpdateUserForManager, UpdateTask, SelectTask
 
 project_router = APIRouter(prefix='/project', tags=['Project'])
 
 
 @project_router.get('/')
-async def get_projects(request: Request, session: AsyncSession = Depends(get_async_session)):
+async def get_projects(
+        request: Request,
+        session: AsyncSession = Depends(get_async_session)
+):
     decode_data = get_current_user(request)
     user_id = decode_data['id']
-    query = select(ProjectUser).where(ProjectUser.user_id == user_id).options(joinedload(ProjectUser.user)).options(joinedload(ProjectUser.project))
+    query = (
+        select(ProjectUser)
+        .where(ProjectUser.user_id == user_id)
+        .options(joinedload(ProjectUser.user))
+        .options(joinedload(ProjectUser.project))
+    )
     resulst = await session.execute(query)
     return resulst.scalars().all()
 
 
-@project_router.get('/tasks', response_model=list[SelectTask])
-async def get_tasks(project_id: int, request: Request, session: AsyncSession = Depends(get_async_session)):
-    query = select(Task).where(Task.project_id == project_id)
+@project_router.get('/tasks')
+async def get_tasks(
+        project_id: int,
+        request: Request,
+        session: AsyncSession = Depends(get_async_session)
+):
+    query = (
+        select(Task)
+        .where(Task.project_id == project_id)
+        .order_by(Task.updated_at.desc())
+    )
     resulst = await session.execute(query)
     return resulst.scalars().all()
-
-
-@project_router.get('/users')
-async def get_users(project_id: int, request: Request, session: AsyncSession = Depends(get_async_session)):
-    query = select(ProjectUser.user)
-    resulst = await session.execute(query)    
-    return [resulst.scalars().all()]
 
 
 @project_router.post('/add')
-async def add_project(body: CreatedProject, request: Request, session: AsyncSession = Depends(get_async_session)):
+async def add_project(
+        body: CreatedProject,
+        request: Request,
+        session: AsyncSession = Depends(get_async_session)
+):
     decode_data = get_current_user(request)
     user_id = decode_data['id']
     data = body.model_dump()
-    try:
-        project = Project(**data)
-        project_user = ProjectUser(user_id=user_id, project=project, role=Role.meneger.name)
-        session.add(project)
-        session.add(project_user)
-        await session.commit()
-        return {
-            'message': 'Проект успешно добавлена'
-        }
-    except:
-        HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail='Необработанный ответ'
-        )
+    project = Project(**data)
+    project_user = ProjectUser(
+        user_id=user_id,
+        project=project,
+        role=Role.meneger.name
+    )
+    session.add(project)
+    session.add(project_user)
+    await session.commit()
+    return {
+        'message': 'Проект успешно добавлена'
+    }
 
 
 @project_router.get('/task/{task_id}')
-async def get_task(task_id: int, requset: Request, session: AsyncSession = Depends(get_async_session)):
-    query = select(Task).where(Task.id == task_id)
+async def get_task(
+        task_id: int,
+        requset: Request,
+        session: AsyncSession = Depends(get_async_session)
+):
+    query = select(Task).where(Task.id == task_id).options(joinedload(Task.blocked_by), joinedload(Task.blocking_by))
     result = await session.execute(query)
     return [result.scalar()]
 
 
 @project_router.post('/task/add')
-async def add_task_in_project(project_id: int, body: CreatedTask, request: Request, session: AsyncSession = Depends(get_async_session)):
+async def add_task_in_project(
+        project_id: int,
+        body: CreatedTask,
+        request: Request,
+        session: AsyncSession = Depends(get_async_session)
+):
     decode_data = get_current_user(request)
     user_id = decode_data['id']
     data = body.model_dump()
@@ -82,11 +96,21 @@ async def add_task_in_project(project_id: int, body: CreatedTask, request: Reque
     return {
         'message': 'Задача успешно добавлена'
     }
-    
 
 
 @project_router.put('/task/{task_id}')
-async def update_task(project_id: int, task_id: int, body: UpdateTask, request: Request, session: AsyncSession = Depends(get_async_session)):
+async def update_task(
+        project_id: int,
+        task_id: int,
+        body: UpdateTask,
+        request: Request,
+        session: AsyncSession = Depends(get_async_session)
+):
+    if await check_blocked(session, task_id):
+        return {
+            'message': 'У данной задачи есть блокирующие задачи, вы не моежете изменить ее статус пока не закончите блокирующие'
+        }
+
     data = body.model_dump()
 
     executor_id = data['executor_id']
@@ -124,65 +148,81 @@ async def update_task(project_id: int, task_id: int, body: UpdateTask, request: 
     }
 
 
-@project_router.post('/user/add')
-async def add_user_in_project(project_id: int, body: UpdateUserForManager, request: Request, session: AsyncSession = Depends(get_async_session)):
-    user = await get_user_username(session, body.username)
-    try:
-        project_user = ProjectUser(project_id=project_id, user_id=user.id, role=body.role)
-        session.add(project_user)
-        await session.commit()
-        return {
-            'message': 'Пользователь успешно добавлен в проект'
-        }
-    except Exception as e:
-        await session.rollback()
-        HTTPException(
-            status_code=status.HTTP_100_CONTINUE,
-            detail=str(e)
-        )
-
-
-@project_router.put('/user/{username}')
-async def update_user_in_project(project_id: int, body: UpdateUserForManager, username: str, request: Request, session: AsyncSession = Depends(get_async_session)):
-    decode_data = get_current_user(request)
-    meneger_id = decode_data['id']
-    query = select(ProjectUser).where(ProjectUser.user_id==meneger_id).where(ProjectUser.project_id==project_id)
-    meneger = await session.scalar(query)
-
-    if meneger.role.value != Role.meneger.value:
+@project_router.delete('/task/{task_id}')
+async def delete_task(
+        task_id: int,
+        project_id: int,
+        request: Request,
+        session: AsyncSession = Depends(get_async_session),
+):
+    current_user = await search_user_in_project(request, session, project_id)
+    if current_user.role.value != Role.meneger.value:
         return HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail='Вы не менеджер в этом проекте'
         )
-    user = await get_user_username(session, username)
-    if user is None:
+    if await check_blocked(session, task_id):
+        return {
+            'message': 'У данной задачи есть блокирующие задачи, вы не можеете удалить'
+        }
+    query = (
+        delete(Task)
+        .where(Task.id == task_id)
+    )
+    await session.execute(query)
+    return {
+        'message': 'Задача успешно удалена'
+    }
+
+
+@project_router.post('/user/add')
+async def add_user_in_project(
+        project_id: int,
+        body: UpdateUserForManager,
+        request: Request,
+        session: AsyncSession = Depends(get_async_session)
+):
+    user = await get_user_username(session, body.username)
+    project_user = ProjectUser(
+        project_id=project_id,
+        user_id=user.id,
+        role=body.role
+    )
+    session.add(project_user)
+    await session.commit()
+    return {
+        'message': 'Пользователь успешно добавлен в проект'
+    }
+
+
+@project_router.put('/user/{username}')
+async def update_user_in_project(
+        project_id: int,
+        body: UpdateUserForManager,
+        username: str, request: Request,
+        session: AsyncSession = Depends(get_async_session)
+):
+    current_user = await search_user_in_project(request, session, project_id)
+    if current_user.role.value != Role.meneger.value:
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='Вы не менеджер в этом проекте'
+        )
+    updete_user = await get_user_username(session, username)
+    if updete_user is None:
         return {
             'message': 'Данный пользователь не найден в этом проекте'
         }
-    user.username = body.username
+    updete_user.username = body.username
     await session.commit()
-    try:
-        qyery = update(ProjectUser).where(ProjectUser.user_id==user.id).where(ProjectUser.project_id==project_id).values(role=body.role)
-        await session.execute(qyery)
-        await session.commit()
-        return {
-            'message': 'Пользователь успешно изменён'
-        }
-    except Exception as e:
-        await session.rollback()
-        HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(e)
-        )
-
-
-
-
-
-
-
-
-
-
-
-
+    qyery = (
+        update(ProjectUser)
+        .where(ProjectUser.user_id == updete_user.id)
+        .where(ProjectUser.project_id == project_id)
+        .values(role=body.role)
+    )
+    await session.execute(qyery)
+    await session.commit()
+    return {
+        'message': 'Пользователь успешно изменён'
+    }

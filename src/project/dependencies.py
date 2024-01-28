@@ -2,14 +2,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database import async_session_maker
-from src.project.models import User, ProjectUser, Role, Status
+from src.project.models import User, ProjectUser, Role, Status, Task
+from src.auth.router import get_current_user
 
 
 class StatusCheck:
     def __init__(self, current_status, new_status) -> None:
         self.current_status = current_status
         self.new_status = new_status
-    
+
     def check_status(self):
         if self.new_status in [Status.to_do, Status.wontfix]:
             return True
@@ -25,6 +26,7 @@ class StatusCheck:
             return True
         else:
             return False
+
 
 class TaskCheck:
     def __init__(self, status, executor):
@@ -48,6 +50,7 @@ class TaskCheck:
             return True
         return self.is_valid_executor(executor)
 
+
 async def get_role_id(session: AsyncSession, id: int, project_id: int):
     query = select(ProjectUser.role).where(ProjectUser.user_id == id).where(ProjectUser.project_id == project_id)
     result = await session.execute(query)
@@ -64,3 +67,24 @@ async def get_user_username(session: AsyncSession, username: str):
     query = select(User).where(User.username == username)
     resulst = await session.execute(query)
     return resulst.scalar_one_or_none()
+
+
+async def check_blocked(session: AsyncSession, task_id):
+    query = select(Task).where(Task.blocking_by_id == task_id)
+    results = await session.execute(query)
+    print(results)
+    if results.scalars().first():
+        return True
+    return False
+
+
+async def search_user_in_project(request, session: AsyncSession, project_id: int) -> User:
+    decode_data = get_current_user(request)
+    user_id = decode_data['id']
+    query = (
+        select(ProjectUser)
+        .where(ProjectUser.user_id == user_id)
+        .where(ProjectUser.project_id == project_id)
+    )
+    user = await session.scalar(query)
+    return user
